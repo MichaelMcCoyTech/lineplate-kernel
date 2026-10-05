@@ -1,0 +1,27 @@
+diff --git a/src/ModelingAlgorithms/TKGeomAlgo/IntWalk/IntWalk_IWalking.gxx b/src/ModelingAlgorithms/TKGeomAlgo/IntWalk/IntWalk_IWalking.gxx
+index dcc6e625..edf99b1f 100644
+--- a/src/ModelingAlgorithms/TKGeomAlgo/IntWalk/IntWalk_IWalking.gxx
++++ b/src/ModelingAlgorithms/TKGeomAlgo/IntWalk/IntWalk_IWalking.gxx
+@@ -1046,7 +1046,12 @@ void IntWalk_IWalking::FillPntsInHoles(TheIWFunction&
+   for (int i = 1; i < CopySeqAlone.Length(); i++)
+   {
+     int Irang1 = CopySeqAlone(i);
+-    if (Irang1 == 0)
++    // cadoc patch (kernel/build/patches): an "alone" point can name the line that was being
++    // walked when it was recorded (lines.Length() + 1) and was never added. Reading it read
++    // past the sequence and left its cursor pointing at the wrong item, so the next
++    // lines.Value() returned a null node (a segfault natively, arbitrary memory in WASM).
++    // Such points are skipped, as Arrive() above already skips them.
++    if (Irang1 == 0 || std::abs(Irang1) > lines.Length())
+       continue;
+     bool                                  ToRemove = false;
+     IntSurf_PntOn2S                       PointAlone1, PointAlone2;
+@@ -1061,7 +1066,7 @@ void IntWalk_IWalking::FillPntsInHoles(TheIWFunction&
+     for (int j = i + 1; j <= CopySeqAlone.Length(); j++)
+     {
+       int Irang2 = CopySeqAlone(j);
+-      if (Irang2 == 0 || BadSolutions.Contains(Irang2))
++      if (Irang2 == 0 || BadSolutions.Contains(Irang2) || std::abs(Irang2) > lines.Length())
+         continue;
+       const occ::handle<IntWalk_TheIWLine>& Line2 = lines.Value(std::abs(Irang2));
+       if (Irang2 > 0)

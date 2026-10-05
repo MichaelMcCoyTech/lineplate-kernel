@@ -1,0 +1,55 @@
+diff --git a/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx b/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx
+index ab216499..0da2f8b1 100644
+--- a/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx
++++ b/src/ModelingAlgorithms/TKShHealing/ShapeFix/ShapeFix_IntersectionTool.cxx
+@@ -38,6 +38,8 @@
+ #include <ShapeFix_IntersectionTool.hxx>
+ #include <TopExp_Explorer.hxx>
+ #include <TopoDS.hxx>
++#include <NCollection_Array1.hxx>
++#include <algorithm>
+ #include <TopoDS_Edge.hxx>
+ #include <TopoDS_Face.hxx>
+ #include <TopoDS_Iterator.hxx>
+@@ -1062,6 +1064,13 @@ bool ShapeFix_IntersectionTool::FixSelfIntersectWire(occ::handle<ShapeExtend_Wir
+   NbCut           = 0;
+   int  nbReplaced = 0;
+   bool isDone     = false;
++  // The wire's edges live in a linked sequence, so sewd->Edge(i) costs O(i) once the
++  // sequence's cursor has moved away; read in this double loop that made the loop cubic in
++  // the wire's edge count (minutes on wires with thousands of edges). The edges are read
++  // from a snapshot instead, refreshed whenever the wire may have changed: every change
++  // below happens after a box overlap, so the snapshot is re-taken after each such pair.
++  NCollection_Array1<TopoDS_Shape> edgeSnapshot;
++  bool                             snapshotStale = true;
+   for (int num1 = 1; num1 < sewd->NbEdges() && NbSplit < 30; num1++)
+   {
+     // for each edge from first wire
+@@ -1072,8 +1081,17 @@ bool ShapeFix_IntersectionTool::FixSelfIntersectWire(occ::handle<ShapeExtend_Wir
+       {
+         continue;
+       }
+-      TopoDS_Edge edge1 = sewd->Edge(num1);
+-      TopoDS_Edge edge2 = sewd->Edge(num2);
++      if (snapshotStale || edgeSnapshot.Length() != sewd->NbEdges())
++      {
++        edgeSnapshot.Resize(1, std::max(sewd->NbEdges(), 1), false);
++        for (int k = 1; k <= sewd->NbEdges(); ++k)
++        {
++          edgeSnapshot.SetValue(k, sewd->Edge(k));
++        }
++        snapshotStale = false;
++      }
++      TopoDS_Edge edge1 = TopoDS::Edge(edgeSnapshot.Value(num1));
++      TopoDS_Edge edge2 = TopoDS::Edge(edgeSnapshot.Value(num2));
+       if (edge1.IsSame(edge2))
+       {
+         continue;
+@@ -1090,6 +1108,7 @@ bool ShapeFix_IntersectionTool::FixSelfIntersectWire(occ::handle<ShapeExtend_Wir
+       Bnd_Box2d B2 = boxes.Find(edge2);
+       if (!B1.IsOut(B2))
+       {
++        snapshotStale = true; // the wire may change from here on
+         // intersection is possible...
+         double                    a1, b1, a2, b2;
+         occ::handle<Geom2d_Curve> Crv1, Crv2;

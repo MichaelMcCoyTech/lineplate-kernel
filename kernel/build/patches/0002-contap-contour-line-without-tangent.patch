@@ -1,0 +1,34 @@
+diff --git a/src/ModelingAlgorithms/TKHLR/Contap/Contap_Contour.cxx b/src/ModelingAlgorithms/TKHLR/Contap/Contap_Contour.cxx
+index 26938105..45d8f238 100644
+--- a/src/ModelingAlgorithms/TKHLR/Contap/Contap_Contour.cxx
++++ b/src/ModelingAlgorithms/TKHLR/Contap/Contap_Contour.cxx
+@@ -1714,8 +1714,27 @@ void Contap_Contour::Perform(const occ::handle<Adaptor3d_TopolTool>& Domain)
+       // jag 941018 On calcule une seule fois la transition
+ 
+       tgline = iwline->TangentVector(k);
+-      iwline->Line()->Value(k).ParametersOnS2(U, V);
+-      TypeTransOnS = ComputeTransitionOnLine(mySFunc, U, V, tgline);
++      // cadoc patch (kernel/build/patches): a line whose walk never recorded a tangent has
++      // index -1 here, and Value(-1) read outside the line (a null dereference natively, an
++      // arbitrary transition in WASM). Take the tangent from its first two points instead, or
++      // leave the transition undecided for a one-point line.
++      if (k < 1 || k > Nbpts)
++      {
++        if (Nbpts >= 2)
++        {
++          k      = 1;
++          tgline = gp_Vec(iwline->Line()->Value(1).Value(), iwline->Line()->Value(2).Value());
++        }
++        else
++        {
++          k = 0;
++        }
++      }
++      if (k >= 1 && tgline.SquareMagnitude() > 0.0)
++      {
++        iwline->Line()->Value(k).ParametersOnS2(U, V);
++        TypeTransOnS = ComputeTransitionOnLine(mySFunc, U, V, tgline);
++      }
+       theline.SetTransitionOnS(TypeTransOnS);
+ 
+       //---------------------------------------------------------------------

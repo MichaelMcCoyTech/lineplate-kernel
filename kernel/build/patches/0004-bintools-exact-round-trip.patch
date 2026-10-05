@@ -1,0 +1,384 @@
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_Curve2dSet.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_Curve2dSet.cxx
+index d88fe080..d0d2f4c8 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_Curve2dSet.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_Curve2dSet.cxx
+@@ -41,6 +41,30 @@
+ #include <Standard_Integer.hxx>
+ #include <Message_ProgressScope.hxx>
+ 
++#include <cmath>
++
++// cadoc patch (kernel/build/patches, 0004): a read restores the directions that were
++// written, bit for bit (see BinTools_CurveSet.cxx). The written components are kept only when
++// they are already a unit vector, or what the rebuilt placement holds, to 1e-12; anything else
++// is normalised as before.
++static void restoreWrittenDir(gp_Dir2d& theD, const double theX, const double theY)
++{
++  if (std::abs(theX * theX + theY * theY - 1.0) <= 1.0e-12)
++  {
++    const_cast<gp_XY&>(theD.XY()).SetCoord(theX, theY);
++  }
++}
++
++static gp_Ax22d exactAx22d(const gp_Pnt2d& theP, const gp_Dir2d& theX, const gp_Dir2d& theY)
++{
++  gp_Ax22d anAx(theP, theX, theY);
++  if (anAx.YDirection().IsEqual(theY, 1.0e-12))
++  {
++    const_cast<gp_Dir2d&>(anAx.YDirection()) = theY;
++  }
++  return anAx;
++}
++
+ #define LINE 1
+ #define CIRCLE 2
+ #define ELLIPSE 3
+@@ -344,6 +368,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir2d& D)
+   BinTools::GetReal(IS, X);
+   BinTools::GetReal(IS, Y);
+   D.SetCoord(X, Y);
++  restoreWrittenDir(D, X, Y);
+   return IS;
+ }
+ 
+@@ -367,7 +392,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom2d_Cir
+   double   R = 0.;
+   IS >> P >> AX >> AY;
+   BinTools::GetReal(IS, R);
+-  C = new Geom2d_Circle(gp_Ax22d(P, AX, AY), R);
++  C = new Geom2d_Circle(exactAx22d(P, AX, AY), R);
+   return IS;
+ }
+ 
+@@ -381,7 +406,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom2d_Ell
+   IS >> P >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+   BinTools::GetReal(IS, R2);
+-  E = new Geom2d_Ellipse(gp_Ax22d(P, AX, AY), R1, R2);
++  E = new Geom2d_Ellipse(exactAx22d(P, AX, AY), R1, R2);
+   return IS;
+ }
+ 
+@@ -394,7 +419,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom2d_Par
+   double   R1 = 0.;
+   IS >> P >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+-  C = new Geom2d_Parabola(gp_Ax22d(P, AX, AY), R1);
++  C = new Geom2d_Parabola(exactAx22d(P, AX, AY), R1);
+   return IS;
+ }
+ 
+@@ -408,7 +433,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom2d_Hyp
+   IS >> P >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+   BinTools::GetReal(IS, R2);
+-  H = new Geom2d_Hyperbola(gp_Ax22d(P, AX, AY), R1, R2);
++  H = new Geom2d_Hyperbola(exactAx22d(P, AX, AY), R1, R2);
+   return IS;
+ }
+ 
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_CurveSet.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_CurveSet.cxx
+index 249c0293..aa97f70f 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_CurveSet.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_CurveSet.cxx
+@@ -37,6 +37,33 @@
+ #include <Standard_Integer.hxx>
+ #include <Message_ProgressScope.hxx>
+ 
++#include <cmath>
++
++// cadoc patch (kernel/build/patches, 0004): a read restores the directions that were
++// written, bit for bit. Every direction BinTools writes is a gp_Dir's own components, already
++// of unit length, and every axis placement is written with its X and Y directions. Reading
++// used to normalise each direction again (SetCoord) and rebuild X and Y from the main and X
++// directions, which can move their last bits: enough for exact HLR to flip an edge lying on a
++// visibility boundary. The written components are kept only when they are already a unit
++// vector, or what the rebuilt placement holds, to 1e-12; anything else is normalised as before.
++static void restoreWrittenDir(gp_Dir& theD, const double theX, const double theY, const double theZ)
++{
++  if (std::abs(theX * theX + theY * theY + theZ * theZ - 1.0) <= 1.0e-12)
++  {
++    const_cast<gp_XYZ&>(theD.XYZ()).SetCoord(theX, theY, theZ);
++  }
++}
++
++template <class Ax>
++static void restoreWrittenFrame(Ax& theAx, const gp_Dir& theX, const gp_Dir& theY)
++{
++  if (theAx.XDirection().IsEqual(theX, 1.0e-12) && theAx.YDirection().IsEqual(theY, 1.0e-12))
++  {
++    const_cast<gp_Dir&>(theAx.XDirection()) = theX;
++    const_cast<gp_Dir&>(theAx.YDirection()) = theY;
++  }
++}
++
+ #define LINE 1
+ #define CIRCLE 2
+ #define ELLIPSE 3
+@@ -353,6 +380,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir& D)
+   BinTools::GetReal(IS, Y);
+   BinTools::GetReal(IS, Z);
+   D.SetCoord(X, Y, Z);
++  restoreWrittenDir(D, X, Y, Z);
+   return IS;
+ }
+ 
+@@ -376,7 +404,9 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom_Circl
+   double R = 0.;
+   IS >> P >> A >> AX >> AY;
+   BinTools::GetReal(IS, R);
+-  C = new Geom_Circle(gp_Ax2(P, A, AX), R);
++  gp_Ax2 anAx(P, A, AX);
++  restoreWrittenFrame(anAx, AX, AY);
++  C = new Geom_Circle(anAx, R);
+   return IS;
+ }
+ 
+@@ -390,7 +420,9 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom_Ellip
+   IS >> P >> A >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+   BinTools::GetReal(IS, R2);
+-  E = new Geom_Ellipse(gp_Ax2(P, A, AX), R1, R2);
++  gp_Ax2 anAx(P, A, AX);
++  restoreWrittenFrame(anAx, AX, AY);
++  E = new Geom_Ellipse(anAx, R1, R2);
+   return IS;
+ }
+ 
+@@ -403,7 +435,9 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom_Parab
+   double R1 = 0.;
+   IS >> P >> A >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+-  C = new Geom_Parabola(gp_Ax2(P, A, AX), R1);
++  gp_Ax2 anAx(P, A, AX);
++  restoreWrittenFrame(anAx, AX, AY);
++  C = new Geom_Parabola(anAx, R1);
+   return IS;
+ }
+ 
+@@ -417,7 +451,9 @@ static Standard_IStream& operator>>(Standard_IStream& IS, occ::handle<Geom_Hyper
+   IS >> P >> A >> AX >> AY;
+   BinTools::GetReal(IS, R1);
+   BinTools::GetReal(IS, R2);
+-  H = new Geom_Hyperbola(gp_Ax2(P, A, AX), R1, R2);
++  gp_Ax2 anAx(P, A, AX);
++  restoreWrittenFrame(anAx, AX, AY);
++  H = new Geom_Hyperbola(anAx, R1, R2);
+   return IS;
+ }
+ 
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_FormatVersion.hxx b/src/ModelingData/TKBRep/BinTools/BinTools_FormatVersion.hxx
+index 0a5bdc68..8e8baa42 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_FormatVersion.hxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_FormatVersion.hxx
+@@ -27,13 +27,17 @@ enum BinTools_FormatVersion
+   BinTools_FormatVersion_VERSION_4 = 4, //!< Stores per-vertex normal information in case
+                                         //!  of triangulation-only Faces, because
+                                         //!  no analytical geometry to restore normals
++  BinTools_FormatVersion_VERSION_5 = 5, //!< (cadoc patch 0004) As version 4, and stores each
++                                        //!  location's transformation exactly (form, scale
++                                        //!  factor, matrix and translation), so a write-read
++                                        //!  round trip restores it bit for bit
+   BinTools_FormatVersion_CURRENT = BinTools_FormatVersion_VERSION_4 //!< Current version
+ };
+ 
+ enum
+ {
+   BinTools_FormatVersion_LOWER = BinTools_FormatVersion_VERSION_1,
+-  BinTools_FormatVersion_UPPER = BinTools_FormatVersion_VERSION_4
++  BinTools_FormatVersion_UPPER = BinTools_FormatVersion_VERSION_5
+ };
+ 
+ #endif
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.cxx
+index 2afbae03..9de535d1 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.cxx
+@@ -47,6 +47,55 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Trsf& T)
+   return IS;
+ }
+ 
++// cadoc patch (kernel/build/patches, 0004): a transformation written exactly (format version 5,
++// location record type 3): its form, its scale factor, its matrix without the scale factor and
++// its translation. Type 1 writes the matrix multiplied by the scale factor and no form, and its
++// reading (gp_Trsf::SetValues) re-derives the scale from the determinant, re-orthogonalises the
++// matrix and sets the form to gp_CompoundTrsf: a few ulps off, and a different code path in
++// gp_Trsf::Multiply. Reading type 3 sets the fields as written.
++static void writeExact(Standard_OStream& OS, const gp_Trsf& T)
++{
++  BinTools::PutInteger(OS, (int)T.Form());
++  BinTools::PutReal(OS, T.ScaleFactor());
++  const gp_Mat& M = T.HVectorialPart();
++  for (int r = 1; r <= 3; ++r)
++    for (int c = 1; c <= 3; ++c)
++      BinTools::PutReal(OS, M(r, c));
++  const gp_XYZ& V = T.TranslationPart();
++  BinTools::PutReal(OS, V.X());
++  BinTools::PutReal(OS, V.Y());
++  BinTools::PutReal(OS, V.Z());
++}
++
++static void readExact(Standard_IStream& IS, gp_Trsf& T)
++{
++  int    aForm  = 0;
++  double aScale = 1.0;
++  BinTools::GetInteger(IS, aForm);
++  BinTools::GetReal(IS, aScale);
++  gp_Mat M;
++  for (int r = 1; r <= 3; ++r)
++    for (int c = 1; c <= 3; ++c)
++    {
++      double v = 0.0;
++      BinTools::GetReal(IS, v);
++      M(r, c) = v;
++    }
++  double X = 0.0, Y = 0.0, Z = 0.0;
++  BinTools::GetReal(IS, X);
++  BinTools::GetReal(IS, Y);
++  BinTools::GetReal(IS, Z);
++  if (aForm < (int)gp_Identity || aForm > (int)gp_Other)
++  {
++    throw Standard_Failure("BinTools_LocationSet::Read: unknown transformation form");
++  }
++  T = gp_Trsf();
++  T.SetScaleFactor(aScale);
++  const_cast<gp_Mat&>(T.HVectorialPart()) = M;
++  T.SetTranslationPart(gp_Vec(X, Y, Z));
++  T.SetForm((gp_TrsfForm)aForm);
++}
++
+ //=================================================================================================
+ // function : operator << (gp_Trsf& T)
+ // purpose  :
+@@ -159,7 +208,12 @@ void BinTools_LocationSet::Write(Standard_OStream& OS) const
+       int             p          = L.FirstPower();
+       TopLoc_Location L1         = L.FirstDatum();
+       bool            elementary = (simple && p == 1);
+-      if (elementary)
++      if (elementary && myFormatNb >= 5)
++      {
++        OS.put((uint8_t)3); // 3: exact (cadoc patch 0004)
++        writeExact(OS, L.Transformation());
++      }
++      else if (elementary)
+       {
+ 
+         OS.put((uint8_t)1); // 1
+@@ -228,6 +282,11 @@ void BinTools_LocationSet::Read(Standard_IStream& IS)
+         IS >> T;
+         L = T;
+       }
++      else if (aTypLoc == 3)
++      {
++        readExact(IS, T);
++        L = T;
++      }
+ 
+       else if (aTypLoc == 2)
+       {
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.hxx b/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.hxx
+index 2e7504a6..f98d5ff4 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.hxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_LocationSet.hxx
+@@ -67,8 +67,13 @@ public:
+   //! is first cleared.
+   Standard_EXPORT void Read(Standard_IStream& IS);
+ 
++  //! The format version written (BinTools_FormatVersion): from version 5 each elementary
++  //! location is written exactly (cadoc patch 0004). Set by BinTools_ShapeSet.
++  void SetFormatNb(const int theFormatNb) { myFormatNb = theFormatNb; }
++
+ private:
+   NCollection_IndexedMap<TopLoc_Location> myMap;
++  int                                     myFormatNb = 4;
+ };
+ 
+ #endif // _BinTools_LocationSet_HeaderFile
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSet.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSet.cxx
+index 2b4bb877..d9e4a2a9 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSet.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSet.cxx
+@@ -309,6 +309,7 @@ void BinTools_ShapeSet::Write(Standard_OStream& OS, const Message_ProgressRange&
+   // write the locations
+   //-----------------------------------------
+ 
++  myLocations.SetFormatNb(FormatNb());
+   myLocations.Write(OS);
+ 
+   //-----------------------------------------
+@@ -411,6 +412,7 @@ void BinTools_ShapeSet::Read(Standard_IStream& IS, const Message_ProgressRange&
+   //-----------------------------------------
+   // read the locations
+   //-----------------------------------------
++  myLocations.SetFormatNb(FormatNb());
+   myLocations.Read(IS);
+   //-----------------------------------------
+   // read the geometry
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSetBase.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSetBase.cxx
+index f3a2c73c..7a4c964c 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSetBase.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_ShapeSetBase.cxx
+@@ -20,7 +20,8 @@ const char* const BinTools_ShapeSetBase::THE_ASCII_VERSIONS[BinTools_FormatVersi
+   "Open CASCADE Topology V1 (c)",
+   "Open CASCADE Topology V2 (c)",
+   "Open CASCADE Topology V3 (c)",
+-  "Open CASCADE Topology V4, (c) Open Cascade"};
++  "Open CASCADE Topology V4, (c) Open Cascade",
++  "Open CASCADE Topology V5, (c) Open Cascade"};
+ 
+ //=================================================================================================
+ // function : operator << (gp_Pnt)
+diff --git a/src/ModelingData/TKBRep/BinTools/BinTools_SurfaceSet.cxx b/src/ModelingData/TKBRep/BinTools/BinTools_SurfaceSet.cxx
+index 28af081d..50debf24 100644
+--- a/src/ModelingData/TKBRep/BinTools/BinTools_SurfaceSet.cxx
++++ b/src/ModelingData/TKBRep/BinTools/BinTools_SurfaceSet.cxx
+@@ -40,6 +40,33 @@
+ #include <NCollection_Array1.hxx>
+ #include <Message_ProgressScope.hxx>
+ 
++#include <cmath>
++
++// cadoc patch (kernel/build/patches, 0004): a read restores the directions that were
++// written, bit for bit. Every direction BinTools writes is a gp_Dir's own components, already
++// of unit length, and every axis placement is written with its X and Y directions. Reading
++// used to normalise each direction again (SetCoord) and rebuild X and Y from the main and X
++// directions, which can move their last bits: enough for exact HLR to flip an edge lying on a
++// visibility boundary. The written components are kept only when they are already a unit
++// vector, or what the rebuilt placement holds, to 1e-12; anything else is normalised as before.
++static void restoreWrittenDir(gp_Dir& theD, const double theX, const double theY, const double theZ)
++{
++  if (std::abs(theX * theX + theY * theY + theZ * theZ - 1.0) <= 1.0e-12)
++  {
++    const_cast<gp_XYZ&>(theD.XYZ()).SetCoord(theX, theY, theZ);
++  }
++}
++
++template <class Ax>
++static void restoreWrittenFrame(Ax& theAx, const gp_Dir& theX, const gp_Dir& theY)
++{
++  if (theAx.XDirection().IsEqual(theX, 1.0e-12) && theAx.YDirection().IsEqual(theY, 1.0e-12))
++  {
++    const_cast<gp_Dir&>(theAx.XDirection()) = theX;
++    const_cast<gp_Dir&>(theAx.YDirection()) = theY;
++  }
++}
++
+ #define PLANE 1
+ #define CYLINDER 2
+ #define CONE 3
+@@ -423,6 +450,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Dir& D)
+   BinTools::GetReal(IS, Y);
+   BinTools::GetReal(IS, Z);
+   D.SetCoord(X, Y, Z);
++  restoreWrittenDir(D, X, Y, Z);
+   return IS;
+ }
+ 
+@@ -438,6 +466,7 @@ static Standard_IStream& operator>>(Standard_IStream& IS, gp_Ax3& A3)
+   {
+     ax3.YReverse();
+   }
++  restoreWrittenFrame(ax3, AX, AY);
+   A3 = ax3;
+   return IS;
+ }
