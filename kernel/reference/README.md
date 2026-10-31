@@ -21,7 +21,7 @@ Environment variables used by the client:
 
 - `CADOC_REFKERNEL`: path to `refkernel.py`. The default is the repo copy.
 - `CADOC_PYTHON`: a Python that has OCP installed. The default is `<repo>/.venv/bin/python`. From a git worktree, the default falls back to the main checkout's `.venv`.
-- `CADOC_CORPUS`: the corpus root that the tests use. The default is `/home/michael/repos/cadoc/corpus/external`. When the files are missing, the tests skip.
+- `CADOC_CORPUS`: the corpus root that the tests use. The default is `/home/michael/repos/lineplate/corpus/external`. When the files are missing, the tests skip.
 
 Startup takes about 3.5 s, almost all of it loading OCP. Start one process and keep it.
 

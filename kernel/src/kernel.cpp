@@ -174,6 +174,8 @@ const std::string& lastTiming() { return g_lastTiming; }
 // r3: OCCT patch 0004, an exact BinTools round trip (directions and axis frames read as written,
 // locations written and read exactly, format version 5), so a document restored by loadCache
 // is bit-identical to the import's; an r2 cache restored shapes a few ulps off.
+// r4: a part whose solids the file names one by one is split into one part per solid (import.cpp,
+// namedSolids), so an r3 cache of such a file holds the wrong tree.
 // "hlr rN" changes whenever exact HLR of the same shapes could answer differently (r2: OCCT
 // patches 0002/0003, the outline walk), for caches of HLR results keyed by this string.
 std::string version() {
@@ -182,7 +184,7 @@ std::string version() {
 #else
   const char* build = "native";
 #endif
-  return std::string("cadoc-kernel 1 (protocol v1; import r3") + (kExactBrep ? "" : ", inexact cache") + "; hlr r2; " + build +
+  return std::string("cadoc-kernel 1 (protocol v1; import r4") + (kExactBrep ? "" : ", inexact cache") + "; hlr r2; " + build +
          "); OCCT " + OCC_VERSION_COMPLETE;
 }
 

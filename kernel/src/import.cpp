@@ -28,6 +28,7 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <TopoDS_Iterator.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <XCAFApp_Application.hxx>
 #include <XCAFDoc_ColorTool.hxx>
@@ -302,6 +303,73 @@ std::string shapeIdFor(ImportCtx& ctx, const TDF_Label& target, const TDF_Label&
   return sid;
 }
 
+/// A name that only says what kind of B-rep it is ("Solid1", "Body 2", ""), or nothing.
+bool typeOnlyName(std::string n) {
+  while (!n.empty() && (std::isdigit((unsigned char)n.back()) || std::isspace((unsigned char)n.back()))) n.pop_back();
+  std::transform(n.begin(), n.end(), n.begin(), [](unsigned char c) { return char(std::tolower(c)); });
+  static const std::set<std::string> kinds = {"", "solid", "body", "shell", "compound", "compsolid", "part"};
+  return kinds.count(n) > 0;
+}
+
+struct NamedSolid {
+  TopoDS_Shape shape;  // located as in the prototype's shape
+  TDF_Label label;     // its sub-shape label
+  std::string name;
+};
+
+/// The solids of a part whose file names each one ("shroud", "bezel": Fusion 360 writes a
+/// component's bodies this way; PiFinder's v2 case, 30 Oct 2026). Such a part is several
+/// parts. Empty unless the shape is a compound of two or more solids and every solid carries
+/// a name that is more than its kind (sub-shape names need read.stepcaf.subshapes.name).
+std::vector<NamedSolid> namedSolids(const TDF_Label& target) {
+  const TopoDS_Shape shape = XCAFDoc_ShapeTool::GetShape(target);
+  if (shape.IsNull() || shape.ShapeType() != TopAbs_COMPOUND) return {};
+  NCollection_Sequence<TDF_Label> subs;
+  XCAFDoc_ShapeTool::GetSubShapes(target, subs);
+  if (subs.Length() < 2) return {};
+  std::vector<NamedSolid> out;
+  for (TopoDS_Iterator it(shape); it.More(); it.Next()) {
+    const TopoDS_Shape& s = it.Value();
+    if (s.ShapeType() != TopAbs_SOLID) return {};
+    NamedSolid ns{s, TDF_Label(), ""};
+    for (int i = 1; i <= subs.Length(); ++i) {
+      if (XCAFDoc_ShapeTool::GetShape(subs.Value(i)).TShape() == s.TShape()) {
+        ns.label = subs.Value(i);
+        ns.name = labelName(ns.label);
+        break;
+      }
+    }
+    if (typeOnlyName(ns.name)) return {};
+    out.push_back(std::move(ns));
+  }
+  if (out.size() < 2) return {};
+  return out;
+}
+
+/// The ShapeId of one named solid of a part (namedSolids), keyed by its sub-shape label.
+std::string shapeIdForSolid(ImportCtx& ctx, const NamedSolid& ns, const TDF_Label& target, const TDF_Label& instLbl) {
+  TCollection_AsciiString entryS;
+  TDF_Tool::Entry(ns.label, entryS);
+  std::string entry = entryS.ToCString();
+  auto found = ctx.shapeOfEntry.find(entry);
+  if (found != ctx.shapeOfEntry.end()) return found->second;
+  auto t0 = Clock::now();
+  const std::string sid = "s" + std::to_string(ctx.recs.size());
+  ctx.shapeOfEntry.emplace(std::move(entry), sid);
+  Pending q;
+  q.name = ns.name;
+  q.hasColor = labelColor(ns.label, q.rgb);
+  if (!q.hasColor) q.hasColor = labelColor(target, q.rgb);
+  if (!q.hasColor && !instLbl.IsNull()) q.hasColor = labelColor(instLbl, q.rgb);
+  auto rec = std::make_unique<ShapeRec>();
+  rec->id = sid;
+  rec->shape = ns.shape;
+  ctx.recs.push_back(std::move(rec));
+  ctx.pending.push_back(std::move(q));
+  ctx.nameColorMs += msSince(t0);
+  return sid;
+}
+
 TDF_Label referred(const TDF_Label& l) {
   TDF_Label t;
   if (XCAFDoc_ShapeTool::IsReference(l) && XCAFDoc_ShapeTool::GetReferredShape(l, t)) return t;
@@ -334,7 +402,10 @@ void build(ImportCtx& ctx, json::Writer& w, const TDF_Label& lbl, bool isCompone
                                   : XCAFDoc_ShapeTool::GetShape(lbl).Location().Transformation();
   const bool assembly = XCAFDoc_ShapeTool::IsAssembly(target);
   std::string sid;
-  if (!assembly) {
+  const std::vector<NamedSolid> solids = assembly ? std::vector<NamedSolid>() : namedSolids(target);
+  if (!solids.empty()) {
+    if (!isComponent) transform = gp_Trsf();  // as a free simple shape: the solids carry its location
+  } else if (!assembly) {
     // The prototype keeps whatever location its label carries; that is its "own coordinates".
     sid = shapeIdFor(ctx, target, isComponent ? lbl : TDF_Label());
     if (!isComponent) transform = gp_Trsf();  // a free simple shape: its location is in the prototype
@@ -357,9 +428,24 @@ void build(ImportCtx& ctx, json::Writer& w, const TDF_Label& lbl, bool isCompone
     const auto segs = segments(names);
     for (size_t i = 0; i < kids.size(); ++i)
       build(ctx, w, kids[i], true, nodeId.empty() ? segs[i] : nodeId + "/" + segs[i], names[i]);
+  } else if (!solids.empty()) {
+    std::vector<std::string> names;
+    for (const auto& ns : solids) names.push_back(ns.name);
+    const auto segs = segments(names);
+    for (size_t i = 0; i < solids.size(); ++i) {
+      const std::string childSid = shapeIdForSolid(ctx, solids[i], target, isComponent ? lbl : TDF_Label());
+      w.beginObject();
+      w.key("id").str(nodeId.empty() ? segs[i] : nodeId + "/" + segs[i]);
+      w.key("name").str(names[i]);
+      w.key("transform");
+      writeMat4(w, gp_Trsf());
+      w.key("children").beginArray().endArray();
+      w.key("shapeId").str(childSid);
+      w.endObject();
+    }
   }
   w.endArray();
-  if (!assembly) w.key("shapeId").str(sid);
+  if (!assembly && solids.empty()) w.key("shapeId").str(sid);
   w.endObject();
 }
 
@@ -402,6 +488,8 @@ std::string doImport(const json::Value& req, const uint8_t* bytes, size_t len, j
     r.SetNameMode(true);
     r.SetLayerMode(false);
     r.SetPropsMode(false);
+    // Names of solids inside a part, onto their sub-shape labels (namedSolids).
+    Interface_Static::SetIVal("read.stepcaf.subshapes.name", 1);
     const IFSelect_ReturnStatus st = r.ReadStream("input.step", in);
     if (st != IFSelect_RetDone) throw KernelError("read-failed", "STEP reader status " + std::to_string(int(st)));
     readMs = msSince(t0);

@@ -74,12 +74,12 @@ from OCP.TCollection import TCollection_AsciiString, TCollection_ExtendedString 
 from OCP.TDataStd import TDataStd_Name  # noqa: E402
 from OCP.TDF import TDF_Label  # noqa: E402
 from OCP.TDocStd import TDocStd_Document  # noqa: E402
-from OCP.TopAbs import TopAbs_EDGE, TopAbs_FACE, TopAbs_Orientation, TopAbs_SOLID  # noqa: E402
+from OCP.TopAbs import TopAbs_COMPOUND, TopAbs_EDGE, TopAbs_FACE, TopAbs_Orientation, TopAbs_SOLID  # noqa: E402
 from OCP.TopExp import TopExp, TopExp_Explorer  # noqa: E402
 from OCP.TopLoc import TopLoc_Location  # noqa: E402
-from OCP.TopoDS import TopoDS, TopoDS_Shape  # noqa: E402
+from OCP.TopoDS import TopoDS, TopoDS_Iterator, TopoDS_Shape  # noqa: E402
 from OCP.UnitsMethods import UnitsMethods_LengthUnit  # noqa: E402
-from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool  # noqa: E402
+from OCP.XCAFDoc import XCAFDoc_ColorType, XCAFDoc_DocumentTool, XCAFDoc_ShapeTool  # noqa: E402
 
 PROTOCOL_VERSION = 1
 
@@ -348,6 +348,46 @@ def escape_segment(name: str) -> str:
     return name.replace("%", "%25").replace("/", "%2F")
 
 
+_TYPE_ONLY_NAMES = {"", "solid", "body", "shell", "compound", "compsolid", "part"}
+
+
+def type_only_name(n: str | None) -> bool:
+    """A name that only says what kind of B-rep it is ("Solid1", "Body 2", ""), or none."""
+    return (n or "").rstrip("0123456789 \t\r\n").lower() in _TYPE_ONLY_NAMES
+
+
+def named_solids(target: TDF_Label) -> list:
+    """The solids of a part whose file names each one ("shroud", "bezel": Fusion 360 writes a
+    component's bodies this way; PiFinder's v2 case, 30 Oct 2026), as (sub-shape label, solid,
+    name). Such a part is several parts. Empty unless the shape is a compound of two or more
+    solids and every solid carries a name that is more than its kind."""
+    st_ = XCAFDoc_ShapeTool
+    shape = st_.GetShape_s(target)
+    if shape.IsNull() or shape.ShapeType() != TopAbs_COMPOUND:
+        return []
+    subs = Sequence_TDF_Label()
+    st_.GetSubShapes_s(target, subs)
+    if subs.Length() < 2:
+        return []
+    sub_list = [subs.Value(i) for i in range(1, subs.Length() + 1)]
+    out = []
+    it = TopoDS_Iterator(shape)
+    while it.More():
+        s = it.Value()
+        if s.ShapeType() != TopAbs_SOLID:
+            return []
+        lab, name = TDF_Label(), None
+        for sl in sub_list:
+            if st_.GetShape_s(sl).TShape() == s.TShape():
+                lab, name = sl, label_name(sl)
+                break
+        if type_only_name(name):
+            return []
+        out.append((lab, s, name))
+        it.Next()
+    return out if len(out) >= 2 else []
+
+
 def read_document(fmt: str, path: str, warnings: list[str]):
     doc = TDocStd_Document(TCollection_ExtendedString("XmlXCAF"))
     XCAFDoc_DocumentTool.SetLengthUnit_s(doc, 1.0, UnitsMethods_LengthUnit.UnitsMethods_LengthUnit_Millimeter)
@@ -359,6 +399,8 @@ def read_document(fmt: str, path: str, warnings: list[str]):
         r.SetNameMode(True)
         r.SetLayerMode(False)
         r.SetPropsMode(False)
+        # Names of solids inside a part, onto their sub-shape labels (named_solids).
+        Interface_Static.SetIVal_s("read.stepcaf.subshapes.name", 1)
         st = r.ReadFile(path)
         if st != IFSelect_ReturnStatus.IFSelect_RetDone:
             raise KernelFailure("read-failed", f"STEP reader status {st}")
@@ -441,28 +483,7 @@ def do_import(req: dict) -> dict:
     shapes: dict[str, ShapeRec] = {}
     shape_of_tag: dict[str, str] = {}
 
-    def shape_id_for(target: TDF_Label, inst_lbl: TDF_Label) -> str:
-        key = TCollection_AsciiString()
-        from OCP.TDF import TDF_Tool
-
-        TDF_Tool.Entry_s(target, key)
-        entry = key.ToCString()
-        if entry in shape_of_tag:
-            return shape_of_tag[entry]
-        sid = f"s{len(shapes)}"
-        shape_of_tag[entry] = sid
-        shp = st.GetShape_s(target)
-        name = label_name(target) or label_name(inst_lbl) or sid
-        color = label_color(target)
-        if color is None:
-            subs = Sequence_TDF_Label()
-            st.GetSubShapes_s(target, subs)
-            for i in range(1, subs.Length() + 1):
-                color = label_color(subs.Value(i))
-                if color is not None:
-                    break
-        if color is None and not inst_lbl.IsNull():
-            color = label_color(inst_lbl)
+    def shape_record(sid: str, shp: TopoDS_Shape, name: str, color) -> ShapeRec:
         faces = index_map(shp, TopAbs_FACE).Size()
         edges = index_map(shp, TopAbs_EDGE).Size()
         bb = bbox_of(shp, optimal=True)
@@ -489,7 +510,49 @@ def do_import(req: dict) -> dict:
         if color is not None:
             info["color"] = list(color)
         diag = math.dist(bb[0], bb[1])
-        shapes[sid] = ShapeRec(sid, shp, info, faces, solid, diag)
+        return ShapeRec(sid, shp, info, faces, solid, diag)
+
+    def shape_id_for(target: TDF_Label, inst_lbl: TDF_Label) -> str:
+        key = TCollection_AsciiString()
+        from OCP.TDF import TDF_Tool
+
+        TDF_Tool.Entry_s(target, key)
+        entry = key.ToCString()
+        if entry in shape_of_tag:
+            return shape_of_tag[entry]
+        sid = f"s{len(shapes)}"
+        shape_of_tag[entry] = sid
+        shp = st.GetShape_s(target)
+        name = label_name(target) or label_name(inst_lbl) or sid
+        color = label_color(target)
+        if color is None:
+            subs = Sequence_TDF_Label()
+            st.GetSubShapes_s(target, subs)
+            for i in range(1, subs.Length() + 1):
+                color = label_color(subs.Value(i))
+                if color is not None:
+                    break
+        if color is None and not inst_lbl.IsNull():
+            color = label_color(inst_lbl)
+        shapes[sid] = shape_record(sid, shp, name, color)
+        return sid
+
+    def shape_id_for_solid(sub_lbl: TDF_Label, solid: TopoDS_Shape, name: str, target: TDF_Label, inst_lbl: TDF_Label) -> str:
+        key = TCollection_AsciiString()
+        from OCP.TDF import TDF_Tool
+
+        TDF_Tool.Entry_s(sub_lbl, key)
+        entry = key.ToCString()
+        if entry in shape_of_tag:
+            return shape_of_tag[entry]
+        sid = f"s{len(shapes)}"
+        shape_of_tag[entry] = sid
+        color = label_color(sub_lbl)
+        if color is None:
+            color = label_color(target)
+        if color is None and not inst_lbl.IsNull():
+            color = label_color(inst_lbl)
+        shapes[sid] = shape_record(sid, solid, name, color)
         return sid
 
     def node_name(lbl: TDF_Label, target: TDF_Label) -> str:
@@ -529,6 +592,21 @@ def do_import(req: dict) -> dict:
                     seen[n] = seen.get(n, 0) + 1
                 child_id = f"{node_id}/{seg}" if node_id else seg
                 node["children"].append(build(k, True, child_id, n))
+        elif solids := named_solids(target):
+            if not is_component:
+                node["transform"] = trsf_to_mat4(gp_Trsf())  # as a free simple shape: the solids carry its location
+            names = [n for _, _, n in solids]
+            counts = {}
+            for n in names:
+                counts[n] = counts.get(n, 0) + 1
+            seen = {}
+            for sub_lbl, solid, n in solids:
+                seg = escape_segment(n)
+                if counts[n] > 1:
+                    seg = f"{seen.get(n, 0)}:{seg}"
+                    seen[n] = seen.get(n, 0) + 1
+                sid = shape_id_for_solid(sub_lbl, solid, n, target, lbl if is_component else TDF_Label())
+                node["children"].append({"id": f"{node_id}/{seg}" if node_id else seg, "name": n, "transform": trsf_to_mat4(gp_Trsf()), "children": [], "shapeId": sid})
         else:
             # The prototype keeps whatever location its label carries; that is its "own coordinates".
             proto_lbl = target

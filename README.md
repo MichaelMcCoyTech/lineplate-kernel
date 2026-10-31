@@ -18,7 +18,7 @@ It contains **only** the kernel (`kernel/`), exactly as it is in Lineplate's pri
 
 ## Releases
 
-Each tag here matches a kernel release that Lineplate has served, named `kernel-v<version>+occt-<OCCT version>-p<patch count>-<source commit>`. The current one is **`kernel-v1.1.0+occt-8.0.1-p4-cdb61ff`**: the files under that tag are byte for byte the source the shipped `cadoc-kernel.wasm` was built from (commit `cdb61ff` in the private repository). Lineplate's [open-source notices](https://lineplate.com/open-source) name the tag it currently serves, and `https://lineplate.com/api/health` reports it as `kernel.release`.
+Each tag here matches a kernel release that Lineplate has served, named `kernel-v<version>+occt-<OCCT version>-p<patch count>-<source commit>`. The current one is **`kernel-v1.2.0+occt-8.0.1-p4-5fa9e61`**: the files under that tag are byte for byte the source the shipped `cadoc-kernel.wasm` was built from (commit `5fa9e61` in the private repository). Lineplate's [open-source notices](https://lineplate.com/open-source) name the tag it currently serves, and `https://lineplate.com/api/health` reports it as `kernel.release`.
 
 ("cadoc" in file and function names is the product's codename; the files keep it so the published hashes stay valid.)
 
@@ -29,7 +29,7 @@ You need Docker and Git, on Linux x86-64 (or WSL2).
 ```bash
 git clone https://github.com/MichaelMcCoyTech/lineplate-kernel
 cd lineplate-kernel
-git checkout kernel-v1.1.0+occt-8.0.1-p4-cdb61ff
+git checkout kernel-v1.2.0+occt-8.0.1-p4-5fa9e61
 kernel/build/build.sh occt-wasm     # clones OCCT V8.0.1, checks the commit, applies the patches, builds OCCT for WebAssembly
 kernel/build/build.sh kernel-wasm   # builds the binding against it
 ```

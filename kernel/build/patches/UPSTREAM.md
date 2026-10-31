@@ -31,9 +31,9 @@ Each doubling costs ×7–8 unpatched (cubic) and ×2–4 patched (the pair loop
 
 **Summary.** In the loop over the walking lines, the transition on the line is computed from `iwline->TangentVector(k)` and `iwline->Line()->Value(k)`. For a line whose walk never recorded a tangent, `k` comes back as -1 and `Value(-1)` reads before the start of the line's point sequence. Natively this is a null dereference (SIGSEGV in exact HLR, `HLRBRep_Algo::Update` → contour computation). In WebAssembly a low address doesn't trap, so it reads arbitrary memory and returns an arbitrary transition. The native and WASM builds of the same code can therefore draw the same part differently.
 
-**Effect.** Exact HLR crashed on some visible parts, in views where an enclosure that normally hides them was removed. Running each crashing part alone in one view was enough to reproduce it.
+**Effect.** Exact HLR crashed on some visible parts, in views where an enclosure that normally hides them was removed. Those crashes were in batches of several parts. This branch has not been reproduced with a part on its own: the 14-view sweep of the part that crashed took the 0003 branch, never this one (table below).
 
-**Reproduction.** The parts where it happened are in a GPL-3.0 model and can't be attached. A search of public shapes found no reproduction yet; see "Searching for public reproductions" below. A report should name the part's geometry (a B-spline face seen nearly edge-on) without attaching it, and ask whether the OCCT team's own test data reaches `k < 1` in this loop. An `Standard_ASSERT_RETURN(k >= 1, ...)` in a debug build would show it.
+**Reproduction.** The parts where it happened are in a GPL-3.0 model and can't be attached. A search of public shapes found no reproduction yet; see "Searching for public reproductions" below. A report can give the call stack and the patched condition without attaching the part, and ask whether the OCCT team's own test data reaches `k < 1` in this loop. An `Standard_ASSERT_RETURN(k >= 1, ...)` in a debug build would show it.
 
 **Suggested fix** (what patch 0002 does). When `k < 1` or `k > NbPoints`, take the tangent from the line's first two points. For a one-point line, leave the transition undecided, as for a zero tangent.
 
@@ -45,7 +45,7 @@ Each doubling costs ×7–8 unpatched (cubic) and ×2–4 patched (the pair loop
 
 **Effect.** As for 2: crashes in exact HLR (the outline walk goes through `Contap_TheIWalking`) on the same kind of parts and views.
 
-**Reproduction.** As for 2: found on GPL-3.0 parts only, and no public reproduction has been found yet (below).
+**Reproduction.** Found on GPL-3.0 parts only. Unlike 2, it reproduces with one of those parts on its own: exact HLR of that part alone, viewed from (-1, -1, 1), takes this branch 100 times (table below). No public shape has been found that takes it.
 
 **Suggested fix** (what patch 0003 does). Skip alone points whose line number is 0 or greater than `lines.Length()`, for both `Irang1` and `Irang2`, as `Arrive()` does.
 
