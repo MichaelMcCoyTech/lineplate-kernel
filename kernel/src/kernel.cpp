@@ -8,6 +8,7 @@
 //   mesh.cpp     "mesh"     BRepMesh triangulations
 //   hlr.cpp      "hlr"      exact or polygonal hidden-line removal -> Curve2D (curves.cpp)
 //   spatial.cpp  "clearance", "sweep"
+//   convert.cpp  "stlToStep"  an STL mesh -> a faceted STEP file
 //   shapes.cpp   "exportShapes", "loadShapes" (binary B-rep cache for large views),
 //                "importCache", "loadCache" (the whole imported document, so a file is imported once)
 //   session.cpp  the current document, placements, meshes, typed-array wire forms
@@ -62,6 +63,7 @@ std::string dispatch(const json::Value& req, const uint8_t* bytes, size_t len, j
   if (type == "loadShapes") return doLoadShapes(req, bytes, len, timing);
   if (type == "importCache") return doImportCache(req, timing);
   if (type == "loadCache") return doLoadCache(req, bytes, len, timing);
+  if (type == "stlToStep") return doStlToStep(req, bytes, len, timing);
   throw bad("unknown request type " + (t && t->kind == json::Value::Kind::String ? repr(t->s) : std::string("None")));
 }
 
@@ -132,7 +134,7 @@ std::string handleEnvelopeLine(const std::string& line) {
   // numbers; or, as a native-transport extension (not protocol v1), "path": an absolute file name.
   std::string data, failure, failureCode = "bad-request";
   const json::Value* type = b->get("type");
-  const bool takesBytes = type && type->kind == json::Value::Kind::String && (type->s == "import" || type->s == "loadShapes" || type->s == "loadCache");
+  const bool takesBytes = type && type->kind == json::Value::Kind::String && (type->s == "import" || type->s == "loadShapes" || type->s == "loadCache" || type->s == "stlToStep");
   if (takesBytes) {
     const json::Value* bytes = b->get("bytes");
     const json::Value* path = b->get("path");

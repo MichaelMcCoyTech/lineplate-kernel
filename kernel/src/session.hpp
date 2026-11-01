@@ -150,6 +150,7 @@ std::string doLoadShapes(const json::Value& req, const uint8_t* bytes, size_t le
 // Import cache (not in the reference kernel): the whole imported document as one blob, and back.
 std::string doImportCache(const json::Value& req, json::Writer& timing);
 std::string doLoadCache(const json::Value& req, const uint8_t* bytes, size_t len, json::Writer& timing);
+std::string doStlToStep(const json::Value& req, const uint8_t* bytes, size_t len, json::Writer& timing);
 
 /// Python-repr-like quoting for messages ('x'), as the reference kernel words them.
 inline std::string repr(const std::string& s) { return "'" + s + "'"; }

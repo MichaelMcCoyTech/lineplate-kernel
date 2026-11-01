@@ -1,11 +1,13 @@
 // "import": a CAD file -> the assembly tree and per-shape properties (protocol.ts ImportResult).
 //
 // Behaviour matches the reference kernel (kernel/reference/refkernel.py, do_import):
-// ids, names, colours, units, warnings and every number. The one difference is the
-// formats this build reads: STEP and BRep. IGES needs OCCT's TKDEIGES, which this build
-// does not include, so it is answered "unsupported-format".
+// ids, names, colours, units, warnings and every number. STEP, IGES (OCCT's TKDEIGES, since
+// kernel 1.3) and BRep are read.
 // SPDX-License-Identifier: LGPL-2.1-only
 #include "session.hpp"
+
+#include <cstdio>
+#include <fstream>
 
 #include <BRepGProp.hxx>
 #include <BRepTools.hxx>
@@ -13,6 +15,10 @@
 #include <GProp_GProps.hxx>
 #include <GProp_PrincipalProps.hxx>
 #include <IFSelect_ReturnStatus.hxx>
+#include <IGESCAFControl_Reader.hxx>
+#include <IGESControl_Reader.hxx>
+#include <IGESData_GlobalSection.hxx>
+#include <IGESData_IGESModel.hxx>
 #include <Interface_Static.hxx>
 #include <NCollection_IndexedMap.hxx>
 #include <Quantity_Color.hxx>
@@ -462,8 +468,6 @@ std::string doImport(const json::Value& req, const uint8_t* bytes, size_t len, j
   const std::string fmt = fmtV && fmtV->kind == json::Value::Kind::String ? fmtV->s : "";
   if (fmt != "step" && fmt != "iges" && fmt != "brep")
     throw KernelError("unsupported-format", "format " + (fmtV ? repr(fmt) : std::string("None")) + " is not supported");
-  if (fmt == "iges")
-    throw KernelError("unsupported-format", "format 'iges' is not supported by this kernel build (it reads STEP and BRep)");
 
   auto t0 = Clock::now();
   std::vector<std::string> warnings;
@@ -504,6 +508,39 @@ std::string doImport(const json::Value& req, const uint8_t* bytes, size_t len, j
     }
     auto t1 = Clock::now();
     if (!r.Transfer(doc)) throw KernelError("read-failed", "STEP transfer failed");
+    transferMs = msSince(t1);
+  } else if (fmt == "iges") {
+    IGESCAFControl_Reader r;
+    Interface_Static::SetCVal("xstep.cascade.unit", "MM");
+    r.SetColorMode(true);
+    r.SetNameMode(true);
+    r.SetLayerMode(false);
+    // OCCT's IGES library has no stream reader (IGESSelect_WorkLibrary doesn't override
+    // ReadStream), so the bytes go through a temporary file: emscripten's in-memory filesystem
+    // in the WASM build, /tmp natively. Removed again whatever happens.
+    static int igesSeq = 0;
+    const std::string tmp = "/tmp/cadoc-import-" + std::to_string(++igesSeq) + ".igs";
+    {
+      std::ofstream f(tmp, std::ios::binary);
+      f.write(reinterpret_cast<const char*>(bytes), std::streamsize(len));
+      if (!f) throw KernelError("read-failed", "couldn't stage the IGES file for reading");
+    }
+    struct RemoveTmp {
+      const std::string& p;
+      ~RemoveTmp() { std::remove(p.c_str()); }
+    } removeTmp{tmp};
+    const IFSelect_ReturnStatus st = r.ReadFile(tmp.c_str());
+    if (st != IFSelect_RetDone) throw KernelError("read-failed", "IGES reader status " + std::to_string(int(st)));
+    readMs = msSince(t0);
+    {
+      occ::handle<IGESData_IGESModel> model = occ::down_cast<IGESData_IGESModel>(r.Model());
+      if (!model.IsNull()) {
+        const occ::handle<TCollection_HAsciiString> u = model->GlobalSection().UnitName();
+        if (!u.IsNull()) sourceUnit = unitName(u->ToCString());
+      }
+    }
+    auto t1 = Clock::now();
+    if (!r.Transfer(doc)) throw KernelError("read-failed", "IGES transfer failed");
     transferMs = msSince(t1);
   } else {  // brep
     TopoDS_Shape shape;

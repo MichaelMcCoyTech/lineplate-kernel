@@ -8,7 +8,8 @@ OCCT_COMMIT="b8f597c677811d1f9f4d8a97f5ae2825c0353a42"
 # First-level toolkits; OCCT's CMake (EXCTRACT_TOOLKIT_FULL_DEPS) adds the
 # full dependency closure. TKXCAF -> TKVCAF -> TKV3d/TKService drags in two
 # Visualization toolkits; no OpenGL toolkit is built.
-OCCT_TOOLKITS="TKDESTEP TKXCAF TKHLR TKMesh TKBO TKShHealing TKPrim"
+# TKDEIGES (IGES import) and TKDESTL (STL read, for STL to STEP) added for kernel 1.3.
+OCCT_TOOLKITS="TKDESTEP TKDEIGES TKDESTL TKXCAF TKHLR TKMesh TKBO TKShHealing TKPrim"
 
 # OCCT adds -DOCC_CONVERT_SIGNALS for every non-MSVC build, which makes each
 # OCC_CATCH_SIGNALS a setjmp() inside a C++ try block. Under emscripten that mix

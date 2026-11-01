@@ -249,6 +249,40 @@ export interface HlrResult {
  * needs. The bytes are opaque to the pipeline: it stores and forwards them.
  */
 
+/**
+ * An STL mesh to a STEP file (kernel src/convert.cpp, since kernel 1.3; not in the reference
+ * kernel). The result is faceted: each triangle a planar face, coplanar triangles merged into one
+ * face (unless mergePlanar is false), and each closed piece of mesh a solid. The STL's numbers are
+ * taken as millimetres. Answered `too-large` above 200,000 triangles.
+ */
+export interface StlToStepRequest {
+  type: "stlToStep";
+  /** The STL file, binary or ASCII. Travels beside the JSON like an import's bytes. */
+  bytes: Uint8Array;
+  /** The product name written into the STEP file. */
+  name?: string;
+  /** Merge triangles that lie in one plane into a single face. Default true. */
+  mergePlanar?: boolean;
+}
+
+export interface StlToStepResult {
+  type: "stlToStep:ok";
+  step: Uint8Array;
+  triangles: number;
+  /** Zero-area triangles left out. */
+  degenerate: number;
+  /** Faces in the STEP file, after merging. */
+  faces: number;
+  /** Closed pieces of mesh, written as solids. */
+  solids: number;
+  /** Pieces with holes, written as open shells (surfaces). */
+  openShells: number;
+  /** Edges on those holes. */
+  openEdges: number;
+  /** Always true: curved surfaces stay as flat facets. */
+  faceted: true;
+}
+
 export interface ExportShapesRequest {
   type: "exportShapes";
   /** Shapes from the last import. */
@@ -402,7 +436,8 @@ export type KernelRequest =
   | ExportShapesRequest
   | LoadShapesRequest
   | ImportCacheRequest
-  | LoadCacheRequest;
+  | LoadCacheRequest
+  | StlToStepRequest;
 export type KernelResult =
   | ImportResult
   | MeshResult
@@ -412,7 +447,8 @@ export type KernelResult =
   | ExportShapesResult
   | LoadShapesResult
   | ImportCacheResult
-  | LoadCacheResult;
+  | LoadCacheResult
+  | StlToStepResult;
 
 export interface KernelError {
   type: "error";

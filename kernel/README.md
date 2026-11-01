@@ -17,7 +17,8 @@ The pipeline can't tell which build it's talking to.
 |---|---|
 | `schema/protocol.ts` | The kernel↔pipeline protocol, and the only interface to the rest of cadoc |
 | `src/kernel.cpp` | Dispatch: one request in, one response or `KernelError` out |
-| `src/import.cpp` | `import`: STEP or BRep to the assembly tree and shape properties |
+| `src/import.cpp` | `import`: STEP, IGES or BRep to the assembly tree and shape properties |
+| `src/convert.cpp` | `stlToStep`: an STL mesh to a faceted STEP file |
 | `src/mesh.cpp` | `mesh`: BRepMesh triangulations |
 | `src/hlr.cpp`, `src/curves.cpp` | `hlr`: exact or polygonal hidden-line removal, orthographic or perspective, targets and per-target occluders; HLR edges to `Curve2D` (conics, recognised lines/arcs/ellipses within 1 µm, Béziers, polylines) |
 | `src/spatial.cpp` | `clearance` and `sweep` |
@@ -31,7 +32,8 @@ The pipeline can't tell which build it's talking to.
 
 The binding implements all of protocol v1 with the behaviour of the Python reference kernel (`reference/refkernel.py`, documented in `reference/README.md`): the same instance ids and shape ids, names, colours, units and warnings, the same edge order, the same curve kinds, and the same clearance and sweep semantics. `pipeline/kernel/parity.test.ts` runs the same requests through all three (reference, native CLI, WASM in Node) on the NIST corpus, CAx-IF as1 and the leader arm. The differences that remain:
 
-- **IGES** is answered `unsupported-format`: this build doesn't include OCCT's TKDEIGES. STEP and BRep are read.
+- **IGES** is read since kernel 1.3 (OCCT's TKDEIGES). OCCT has no IGES stream reader, so the bytes go through a temporary file: emscripten's in-memory filesystem in the WASM build, `/tmp` natively. Before 1.3 IGES was answered `unsupported-format`.
+- **`stlToStep`** (since 1.3, not in the reference kernel): an STL mesh to a faceted STEP file (`src/convert.cpp`, OCCT's TKDESTL reads the mesh). Each triangle a planar face on shared edges, coplanar faces merged, each closed shell a solid, millimetres.
 - **Speed.** The C++ kernels are faster (as1 import: 0.2 s native against 2.6 s for the reference).
 - **`occludersByTarget` (exact HLR) runs once for all targets, not once per target.** Every instance any target needs is loaded once; each target's edges are hidden by its own faces (`Hide(i)`) and by its listed occluders (`Hide(i, j)`), the calls OCCT's `Hide()` makes, restricted to those pairs. A target's edges are never touched by another target's calls. The reference kernel runs one HLR per target, which re-loads shared occluders for every target and also hides occluders' own edges. The parity suite (as1, three targets, one with no entry) gives the same counts, curve kinds and lengths. Polygonal HLR keeps one run per target.
 - **`exportShapes` / `loadShapes`** are extensions for large views (`schema/protocol.ts`, "shape cache"). On `--stdio`, `loadShapes` takes its bytes as `"path"`, like `import`.

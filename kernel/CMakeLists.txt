@@ -11,11 +11,11 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(OpenCASCADE REQUIRED CONFIG)
 
-set(OCCT_LIBS TKDESTEP TKXCAF TKHLR TKMesh TKBO TKShHealing TKPrim TKTopAlgo TKGeomAlgo
+set(OCCT_LIBS TKDESTEP TKDEIGES TKDESTL TKXCAF TKHLR TKMesh TKBO TKShHealing TKPrim TKTopAlgo TKGeomAlgo
               TKBRep TKGeomBase TKG3d TKG2d TKMath TKernel)
 
 add_library(cadoc_kernel_core STATIC src/kernel.cpp src/session.cpp src/import.cpp src/mesh.cpp src/hlr.cpp
-            src/curves.cpp src/spatial.cpp src/shapes.cpp)
+            src/curves.cpp src/spatial.cpp src/shapes.cpp src/convert.cpp)
 target_include_directories(cadoc_kernel_core PUBLIC src ${OpenCASCADE_INCLUDE_DIR})
 target_link_libraries(cadoc_kernel_core PUBLIC ${OCCT_LIBS})
 
