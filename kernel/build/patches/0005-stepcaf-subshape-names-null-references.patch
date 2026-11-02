@@ -1,0 +1,82 @@
+diff --git a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+index 1262ea95..07bb53fb 100644
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -6292,6 +6292,12 @@ void STEPCAFControl_Reader::ExpandManifoldSolidBrep(
+ {
+   // Access outer shell
+   occ::handle<StepShape_ManifoldSolidBrep> aMSB = occ::down_cast<StepShape_ManifoldSolidBrep>(Repr);
++  // cadoc patch (kernel/build/patches, 0005): a file can name an entity it never defines, which
++  // leaves a null handle here and below; skip it, as the shape transfer already does.
++  if (aMSB.IsNull())
++  {
++    return;
++  }
+   occ::handle<StepShape_ConnectedFaceSet>  aShell = aMSB->Outer();
+ 
+   // Expand shell contents to CAF tree
+@@ -6309,7 +6315,15 @@ void STEPCAFControl_Reader::ExpandSBSM(TDF_Label&
+     occ::down_cast<StepShape_ShellBasedSurfaceModel>(Repr);
+ 
+   // Access boundary shells
++  if (aSBSM.IsNull())
++  {
++    return;
++  }
+   occ::handle<NCollection_HArray1<StepShape_Shell>> aShells = aSBSM->SbsmBoundary();
++  if (aShells.IsNull())
++  {
++    return;
++  }
+   for (int s = aShells->Lower(); s <= aShells->Upper(); ++s)
+   {
+     const StepShape_Shell&                  aShell = aShells->Value(s);
+@@ -6337,11 +6351,19 @@ void STEPCAFControl_Reader::ExpandShell(const occ::handle<StepShape_ConnectedFac
+                                         const occ::handle<Transfer_TransientProcess>&  TP,
+                                         const occ::handle<XCAFDoc_ShapeTool>& ShapeTool) const
+ {
++  if (Shell.IsNull())
++  {
++    return;
++  }
+   // Record CAF data
+   SettleShapeData(Shell, RootLab, ShapeTool, TP);
+ 
+   // Access faces
+   occ::handle<NCollection_HArray1<occ::handle<StepShape_Face>>> aFaces = Shell->CfsFaces();
++  if (aFaces.IsNull())
++  {
++    return;
++  }
+   for (int f = aFaces->Lower(); f <= aFaces->Upper(); ++f)
+   {
+     const occ::handle<StepShape_Face>& aFace = aFaces->Value(f);
+@@ -6361,7 +6383,16 @@ void STEPCAFControl_Reader::ExpandShell(const occ::handle<StepShape_ConnectedFac
+     }
+     for (int w = aWires->Lower(); w <= aWires->Upper(); ++w)
+     {
+-      const occ::handle<StepShape_Loop>& aWire = aWires->Value(w)->Bound();
++      const occ::handle<StepShape_FaceBound>& aBound = aWires->Value(w);
++      if (aBound.IsNull())
++      {
++        continue;
++      }
++      const occ::handle<StepShape_Loop>& aWire = aBound->Bound();
++      if (aWire.IsNull())
++      {
++        continue;
++      }
+ 
+       // Record CAF data
+       SettleShapeData(aWire, RootLab, ShapeTool, TP);
+@@ -6377,6 +6408,10 @@ void STEPCAFControl_Reader::ExpandShell(const occ::handle<StepShape_ConnectedFac
+       occ::handle<StepShape_EdgeLoop> anEdgeLoop = occ::down_cast<StepShape_EdgeLoop>(aWire);
+       occ::handle<NCollection_HArray1<occ::handle<StepShape_OrientedEdge>>> anEdges =
+         anEdgeLoop->EdgeList();
++      if (anEdges.IsNull())
++      {
++        continue;
++      }
+       for (int e = anEdges->Lower(); e <= anEdges->Upper(); ++e)
+       {
+         occ::handle<StepShape_OrientedEdge> anOrientedEdge = anEdges->Value(e);

@@ -1,6 +1,6 @@
 # cadoc kernel
 
-The kernel is a thin C++ binding over [Open CASCADE Technology](https://github.com/Open-Cascade-SAS/OCCT) (OCCT) 8.0.1, with four patches of ours to OCCT (`build/patches/`, listed under "Building"). It answers the messages defined in `schema/protocol.ts`, and does nothing else.
+The kernel is a thin C++ binding over [Open CASCADE Technology](https://github.com/Open-Cascade-SAS/OCCT) (OCCT) 8.0.1, with five patches of ours to OCCT (`build/patches/`, listed under "Building"). It answers the messages defined in `schema/protocol.ts`, and does nothing else.
 
 One source tree builds two ways:
 
@@ -65,13 +65,15 @@ kernel/build/build.sh all            # or: occt-wasm | occt-native | kernel-wasm
    - `emscripten/emsdk:6.0.10-x64` (pinned by digest);
    - `ubuntu:24.04` with apt's gcc 13.3 (also pinned by digest).
 3. Both builds use the same OCCT CMake options (`build/occt-config.sh`): Release, `-O3 -DNDEBUG`, static, and single-threaded, with no TBB, FreeType, Tcl/Tk, OpenGL or Draw.
-   - `build.sh` applies cadoc's four patches to the OCCT source first (`build/patches/*.patch`, LGPL-2.1 like OCCT, each applied once, in name order). Upstream bug reports for all four are drafted in `build/patches/UPSTREAM.md` (not submitted). One is a speed fix that leaves every result unchanged:
+   - `build.sh` applies cadoc's five patches to the OCCT source first (`build/patches/*.patch`, LGPL-2.1 like OCCT, each applied once, in name order). Upstream bug reports for the first four are drafted in `build/patches/UPSTREAM.md` (not submitted). One is a speed fix that leaves every result unchanged:
      - `0001-shapefix-selfintersect-wire-edge-snapshot.patch`: `ShapeFix_IntersectionTool::FixSelfIntersectWire` read a wire's edges by index from a linked list inside a double loop, which is cubic in the wire's edge count. On `voron-0.2` it was 40% of the STEP import. The patch reads the edges from a snapshot that is re-taken whenever the wire may have changed. The imported shapes are byte-identical (`spikes/perf-large/RESULT.md`).
    - Two are fixes of undefined behaviour in the outline (contour) walk of exact HLR, which segfaulted the native build on Voron parts seen with the enclosure panels hidden, and read arbitrary memory in WASM (which does not trap on a null read), so the two builds could disagree. Results change only where the old code read outside its arrays:
      - `0002-contap-contour-line-without-tangent.patch`: `Contap_Contour::Perform` used index -1 when a walked line had no recorded tangent; it now takes the tangent from the line's first two points.
      - `0003-intwalk-fillpntsinholes-unadded-line.patch`: `IntWalk_IWalking::FillPntsInHoles` looked up an "alone" point's line by a number that can name the line still being walked (never added), which read past the list and corrupted its cursor; such points are skipped, as `Arrive()` already skips them.
    - One makes OCCT's binary B-rep round trip exact, which the import cache relies on:
      - `0004-bintools-exact-round-trip.patch`: BinTools' readers normalised every direction again (`gp_Dir::SetCoord`) and rebuilt every axis frame from its main and X directions, which moves last bits; they now keep the written components when they are already a unit vector, or what the rebuilt frame holds, to 1e-12 (anything else is normalised as before). A new BinTools format version 5 writes each location exactly (its form, scale factor, matrix and translation; version 4 writes the scaled matrix and reads it back through `gp_Trsf::SetValues`, which re-derives the scale and re-orthogonalises). OCCT's own default format stays version 4; the kernel writes version 5. Found and checked with `tools/cache-diag/`.
+   - One stops a crash on damaged files, in the sub-shape names the kernel asks for since 1.2:
+     - `0005-stepcaf-subshape-names-null-references.patch`: with `read.stepcaf.subshapes.name` on, `STEPCAFControl_Reader::ExpandShell` (and `ExpandManifoldSolidBrep`, `ExpandSBSM`) followed every face bound, loop and edge list without checking for null. A file that names an entity it never defines (a `FACE_BOUND` pointing at `#999999999`, the fuzz corpus's `dangling-ref`) left a null handle there: native OCCT turns that into an exception, but in WASM the call through it trapped the kernel ("function signature mismatch"). The patch skips null items, as the shape transfer already does. Kernels 1.2.0 and 1.3.0 trapped on it; 1.1.0 did not ask for sub-shape names.
    - A tree that was built before a patch existed is patched and rebuilt incrementally (one file: about 20 s native, 40 s WASM).
 4. The only flags that differ are the emscripten ones the WASM target requires (`-fwasm-exceptions`, `-sSUPPORT_LONGJMP=wasm`), plus the WASM link settings.
 
@@ -81,7 +83,7 @@ kernel/build/build.sh all            # or: occt-wasm | occt-native | kernel-wasm
 
 Builds are never committed. A kernel ships as a **GitHub Release** of this repo, and the product pins one in `kernel.lock.json` at the repo root, by tag and by the sha256 of every file.
 
-- **Tag:** `kernel-v<major.minor.patch>+occt-<OCCT version>-p<patches>-<source commit>`, e.g. `kernel-v1.1.0+occt-8.0.1-p4-<sha>`: OCCT 8.0.1 with the four patches in `build/patches/`. (1.0.0, `kernel-v1.0.0+occt-8.0.1-da69a78`, predates the patches and has no `-p`.) The major version is `PROTOCOL_VERSION`. A test (`pipeline/kernel/lock.test.ts`) holds the lock to that format, and the patch count to the patches in `build/patches/`.
+- **Tag:** `kernel-v<major.minor.patch>+occt-<OCCT version>-p<patches>-<source commit>`, e.g. `kernel-v1.3.1+occt-8.0.1-p5-<sha>`: OCCT 8.0.1 with the five patches in `build/patches/`. (1.0.0, `kernel-v1.0.0+occt-8.0.1-da69a78`, predates the patches and has no `-p`.) The major version is `PROTOCOL_VERSION`. A test (`pipeline/kernel/lock.test.ts`) holds the lock to that format, and the patch count to the patches in `build/patches/`.
 - **Files:**
   - `cadoc-kernel.mjs` and `cadoc-kernel.wasm`;
   - `cadoc-kernel-cli-linux-x64` (glibc 2.39, Ubuntu 24.04);

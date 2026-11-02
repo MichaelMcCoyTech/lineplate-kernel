@@ -17,7 +17,8 @@ need_occt_src() {
   fi
   test "$(git -C "$KERNEL/occt-src" rev-parse HEAD)" = "b8f597c677811d1f9f4d8a97f5ae2825c0353a42"
   # cadoc's patches to OCCT (patches/*.patch, LGPL-2.1 like OCCT), applied once each in name
-  # order: a speed fix, two undefined-behaviour fixes and an exact BinTools round trip;
+  # order: a speed fix, two undefined-behaviour fixes, an exact BinTools round trip and null
+  # checks in the sub-shape name pass;
   # kernel/README.md lists them, patches/UPSTREAM.md has the bug reports.
   for p in "$HERE"/patches/*.patch; do
     [ -e "$p" ] || continue

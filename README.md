@@ -7,18 +7,19 @@ It contains **only** the kernel (`kernel/`), exactly as it is in Lineplate's pri
 ## What it is
 
 - **[Open CASCADE Technology](https://github.com/Open-Cascade-SAS/OCCT) (OCCT) 8.0.1**, tag `V8.0.1`, commit `b8f597c677811d1f9f4d8a97f5ae2825c0353a42`, licensed under the LGPL 2.1 with the Open CASCADE exception (`LICENSE`, `OCCT-LGPL-EXCEPTION.txt`). OCCT reads the CAD files and computes the hidden lines.
-- **Four patches to OCCT**, in `kernel/build/patches/`, applied in name order by the build recipe before OCCT is compiled. They are LGPL 2.1 like OCCT. `kernel/README.md` explains each, and `kernel/build/patches/UPSTREAM.md` has the reports drafted for upstream:
+- **Five patches to OCCT**, in `kernel/build/patches/`, applied in name order by the build recipe before OCCT is compiled. They are LGPL 2.1 like OCCT. `kernel/README.md` explains each, and `kernel/build/patches/UPSTREAM.md` has the reports drafted for upstream:
   - `0001-shapefix-selfintersect-wire-edge-snapshot.patch`: shape healing reads a wire's edges from a snapshot (faster large imports, identical results);
   - `0002-contap-contour-line-without-tangent.patch`: hidden-line removal no longer reads outside an array when an outline has no tangent;
   - `0003-intwalk-fillpntsinholes-unadded-line.patch`: hidden-line removal no longer reads past a list of outlines;
-  - `0004-bintools-exact-round-trip.patch`: OCCT's binary shape format reads back exactly what it wrote.
+  - `0004-bintools-exact-round-trip.patch`: OCCT's binary shape format reads back exactly what it wrote;
+  - `0005-stepcaf-subshape-names-null-references.patch`: reading the names of solids inside a part no longer crashes on a STEP file that refers to an entity it never defines.
 - **The binding** (`kernel/src/`, `kernel/CMakeLists.txt`): a thin C++ layer that answers JSON requests (import, mesh, hidden-line removal, clearance, shape export) with OCCT, compiled to WebAssembly for the browser and to a native command-line program. It holds no product logic. Licensed under the LGPL 2.1 (`LICENSE`), including its small JSON reader and writer, `kernel/src/json.hpp`.
 - **The build recipe** (`kernel/build/`): pinned containers for both builds (Emscripten `emscripten/emsdk:6.0.10` by digest, and Ubuntu 24.04 for native).
 - `kernel/reference/` is the Python reference implementation of the same protocol (pythonocc), used to check the binding's answers; `kernel/tools/cache-diag/` is the experiment behind patch 0004. Neither is part of the shipped kernel. Their notes mention paths in the private repository (`pipeline/...`, `spikes/...`); those files are not needed to build or run the kernel.
 
 ## Releases
 
-Each tag here matches a kernel release that Lineplate has served, named `kernel-v<version>+occt-<OCCT version>-p<patch count>-<source commit>`. The current one is **`kernel-v1.3.0+occt-8.0.1-p4-814a3d4`**: the files under that tag are byte for byte the source the shipped `cadoc-kernel.wasm` was built from (commit `814a3d4` in the private repository). Lineplate's [open-source notices](https://lineplate.com/open-source) name the tag it currently serves, and `https://lineplate.com/api/health` reports it as `kernel.release`.
+Each tag here matches a kernel release that Lineplate has served, named `kernel-v<version>+occt-<OCCT version>-p<patch count>-<source commit>`. The current one is **`kernel-v1.3.1+occt-8.0.1-p5-4b5b4d1`**: the files under that tag are byte for byte the source the shipped `cadoc-kernel.wasm` was built from (commit `4b5b4d1` in the private repository). Lineplate's [open-source notices](https://lineplate.com/open-source) name the tag it currently serves, and `https://lineplate.com/api/health` reports it as `kernel.release`.
 
 ("cadoc" in file and function names is the product's codename; the files keep it so the published hashes stay valid.)
 
@@ -29,7 +30,7 @@ You need Docker and Git, on Linux x86-64 (or WSL2).
 ```bash
 git clone https://github.com/MichaelMcCoyTech/lineplate-kernel
 cd lineplate-kernel
-git checkout kernel-v1.3.0+occt-8.0.1-p4-814a3d4
+git checkout kernel-v1.3.1+occt-8.0.1-p5-4b5b4d1
 kernel/build/build.sh occt-wasm     # clones OCCT V8.0.1, checks the commit, applies the patches, builds OCCT for WebAssembly
 kernel/build/build.sh kernel-wasm   # builds the binding against it
 ```
