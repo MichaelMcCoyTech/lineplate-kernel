@@ -9,7 +9,10 @@
 #include <cstdio>
 #include <fstream>
 
+#include <BRepAdaptor_Surface.hxx>
+#include <BRepBndLib.hxx>
 #include <BRepGProp.hxx>
+#include <DE_ShapeFixParameters.hxx>
 #include <BRepTools.hxx>
 #include <BRep_Builder.hxx>
 #include <GProp_GProps.hxx>
@@ -34,6 +37,10 @@
 #include <TopExp.hxx>
 #include <TopExp_Explorer.hxx>
 #include <TopLoc_Location.hxx>
+#include <BRep_Tool.hxx>
+#include <Bnd_Box.hxx>
+#include <TopoDS.hxx>
+#include <TopoDS_Face.hxx>
 #include <TopoDS_Iterator.hxx>
 #include <TopTools_ShapeMapHasher.hxx>
 #include <XCAFApp_Application.hxx>
@@ -122,12 +129,12 @@ struct Props {
 };
 
 /// volume, area, centroid, principal moments (ascending, unit density, about the centroid).
-Props shapeProps(const TopoDS_Shape& shape) {
+Props shapeProps(const TopoDS_Shape& shape, bool fromMesh) {
   Props p;
   GProp_GProps areaP, volP;
-  BRepGProp::SurfaceProperties(shape, areaP);
+  BRepGProp::SurfaceProperties(shape, areaP, false, fromMesh);
   p.area = std::abs(areaP.Mass());
-  BRepGProp::VolumeProperties(shape, volP);
+  BRepGProp::VolumeProperties(shape, volP, false, false, fromMesh);
   double volume = volP.Mass();
   GProp_GProps* use = &volP;
   if (!hasSolid(shape) || std::abs(volume) < 1e-12) {
@@ -173,16 +180,53 @@ struct ImportCtx {
   double nameColorMs = 0;
 };
 
+/// Whether measuring this shape exactly would take seconds: the integration and the optimal box
+/// sample every knot span of every freeform surface, so a screw with its thread modelled (a few
+/// faces, hundreds of spans) costs more than a whole housing. A large part with few of them is measured exactly. A huge grid (a terrain, a scan) is
+/// left to the exact way: meshing it costs far more.
+bool freeformHeavy(const TopoDS_Shape& shape) {
+  long long spans = 0, faces = 0;
+  for (TopExp_Explorer ex(shape, TopAbs_FACE); ex.More(); ex.Next()) {
+    ++faces;
+    BRepAdaptor_Surface a(TopoDS::Face(ex.Current()), false);
+    if (a.GetType() != GeomAbs_BSplineSurface || (a.UDegree() < 2 && a.VDegree() < 2)) continue;
+    spans += (long long)std::max(1, a.NbUKnots() - 1) * std::max(1, a.NbVKnots() - 1);
+  }
+  return spans > 200 && spans < 20000 && 2 * spans > faces;
+}
+
+/// The mesh a heavy shape is measured from: fine enough that its box and volume are within about
+/// a thousandth. False if it couldn't be meshed throughout.
+bool meshForProps(ShapeRec& rec) {
+  Box3 loose;
+  if (!bboxOf(rec.shape, false, loose)) return false;
+  const double d = std::sqrt(std::pow(loose.hi[0] - loose.lo[0], 2) + std::pow(loose.hi[1] - loose.lo[1], 2) + std::pow(loose.hi[2] - loose.lo[2], 2));
+  ensureMesh(rec, std::max(1e-3, d * 1e-3), 0.35);
+  TopLoc_Location loc;
+  for (TopExp_Explorer ex(rec.shape, TopAbs_FACE); ex.More(); ex.Next())
+    if (BRep_Tool::Triangulation(TopoDS::Face(ex.Current()), loc).IsNull()) return false;
+  return true;
+}
+
 void computeProps(ShapeRec& rec, Pending& q) {
   auto t0 = Clock::now();
   q.faces = countOf(rec.shape, TopAbs_FACE);
   q.edges = countOf(rec.shape, TopAbs_EDGE);
   q.solid = hasSolid(rec.shape);
   auto t1 = Clock::now();
-  q.bboxOk = bboxOf(rec.shape, true, q.bb);
+  const bool fromMesh = q.faces > 0 && freeformHeavy(rec.shape) && meshForProps(rec);
+  if (fromMesh) {
+    // The mesh's own box, without the faces' tolerances added to it.
+    Bnd_Box box;
+    BRepBndLib::AddClose(rec.shape, box);
+    q.bboxOk = !box.IsVoid();
+    if (q.bboxOk) box.Get(q.bb.lo[0], q.bb.lo[1], q.bb.lo[2], q.bb.hi[0], q.bb.hi[1], q.bb.hi[2]);
+  } else {
+    q.bboxOk = bboxOf(rec.shape, true, q.bb);
+  }
   if (!q.bboxOk) q.bb = Box3{{0, 0, 0}, {0, 0, 0}};
   auto t2 = Clock::now();
-  q.p = shapeProps(rec.shape);
+  q.p = shapeProps(rec.shape, fromMesh);
   q.countMs = std::chrono::duration<double, std::milli>(t1 - t0).count();
   q.bboxMs = std::chrono::duration<double, std::milli>(t2 - t1).count();
   q.propsMs = msSince(t2);
@@ -505,6 +549,16 @@ std::string doImport(const json::Value& req, const uint8_t* bytes, size_t len, j
       if (units.size() == 1) sourceUnit = *units.begin();
       else if (units.size() > 1)
         warnings.push_back("file declares several length units " + listRepr(units) + "; each item is converted from its own");
+    }
+    {
+      // Looking for wires that cross themselves is up to half of a large import, and changed no
+      // line of any of the public files compared (DEPLOY-LOG, 25 Nov 2026).
+      DE_ShapeFixParameters fix;
+      fix.FixSelfIntersectionMode = DE_ShapeFixParameters::FixMode::NotFix;
+      fix.FixIntersectingEdgesMode = DE_ShapeFixParameters::FixMode::NotFix;
+      fix.FixIntersectingWiresMode = DE_ShapeFixParameters::FixMode::NotFix;
+      r.SetShapeFixParameters(fix);
+      r.ChangeReader().SetShapeFixParameters(fix);
     }
     auto t1 = Clock::now();
     if (!r.Transfer(doc)) throw KernelError("read-failed", "STEP transfer failed");

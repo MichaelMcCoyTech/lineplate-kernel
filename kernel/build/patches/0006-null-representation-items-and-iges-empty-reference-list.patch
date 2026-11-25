@@ -1,0 +1,37 @@
+--- a/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
++++ b/src/DataExchange/TKDESTEP/STEPCAFControl/STEPCAFControl_Reader.cxx
+@@ -6126,6 +6126,11 @@
+   const occ::handle<StepShape_ShapeRepresentation>&               theRepresentation,
+   NCollection_Sequence<occ::handle<StepRepr_RepresentationItem>>& theItems)
+ {
++  // cadoc patch (kernel/build/patches, 0006): a representation can come without items.
++  if (theRepresentation.IsNull() || theRepresentation->Items().IsNull())
++  {
++    return;
++  }
+   for (NCollection_HArray1<occ::handle<StepRepr_RepresentationItem>>::Iterator anIter(
+          theRepresentation->Items()->Array1());
+        anIter.More();
+diff --git a/src/DataExchange/TKDEIGES/IGESBasic/IGESBasic_ExternalReferenceFile.cxx b/src/DataExchange/TKDEIGES/IGESBasic/IGESBasic_ExternalReferenceFile.cxx
+index 8be2574c..9ab4843a 100644
+--- a/src/DataExchange/TKDEIGES/IGESBasic/IGESBasic_ExternalReferenceFile.cxx
++++ b/src/DataExchange/TKDEIGES/IGESBasic/IGESBasic_ExternalReferenceFile.cxx
+@@ -28,7 +28,8 @@ IGESBasic_ExternalReferenceFile::IGESBasic_ExternalReferenceFile() = default;
+ void IGESBasic_ExternalReferenceFile::Init(
+   const occ::handle<NCollection_HArray1<occ::handle<TCollection_HAsciiString>>>& aNameArray)
+ {
+-  if (aNameArray->Lower() != 1)
++  // cadoc patch (kernel/build/patches, 0006): an empty list of names is written by Creo.
++  if (!aNameArray.IsNull() && aNameArray->Lower() != 1)
+   {
+     throw Standard_DimensionMismatch("IGESBasic_ExternalReferenceFile : Init");
+   }
+@@ -38,7 +39,7 @@ void IGESBasic_ExternalReferenceFile::Init(
+ 
+ int IGESBasic_ExternalReferenceFile::NbListEntries() const
+ {
+-  return theNames->Length();
++  return theNames.IsNull() ? 0 : theNames->Length();
+ }
+ 
+ occ::handle<TCollection_HAsciiString> IGESBasic_ExternalReferenceFile::Name(const int Index) const
